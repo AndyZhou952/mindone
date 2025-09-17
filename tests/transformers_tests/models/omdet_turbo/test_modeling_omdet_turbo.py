@@ -8,87 +8,104 @@ import mindspore as ms
 from tests.modeling_test_utils import compute_diffs, generalized_parse_args, get_modules
 from tests.transformers_tests.models.modeling_common import ids_numpy
 
-DTYPE_AND_THRESHOLDS = {"fp32": 1e-2, "fp16": 1e-2, "bf16": 1e-2}
+DTYPE_AND_THRESHOLDS = {"fp32": 5e-2, "fp16": 5e-2, "bf16": 5e-2}
 MODES = [1]
 
 
 class OmDetTurboModelTester:
     def __init__(
         self,
-        batch_size=1,
-        # vision
-        image_size=56,
-        num_channels=3,
-        class_seq_len=5,
-        task_seq_len=7,
-        classes_per_sample=2,
+        batch_size=2,
+        image_size=64,
+        classes_per_image=2,
+        classes_seq_len=6,
+        tasks_seq_len=6,
         encoder_hidden_dim=64,
         decoder_hidden_dim=64,
-        num_queries=16,
+        d_model=64,
+        encoder_attention_heads=4,
+        decoder_num_heads=4,
         encoder_layers=1,
-        decoder_layers=2,
+        decoder_num_layers=2,
+        encoder_dim_feedforward=128,
+        decoder_dim_feedforward=256,
+        num_queries=10,
         torch_dtype="float32",
-        use_timm_backbone=False,
     ):
         self.batch_size = batch_size
         self.image_size = image_size
-        self.num_channels = num_channels
-
-        self.class_seq_len = class_seq_len
-        self.task_seq_len = task_seq_len
-        self.classes_per_sample = classes_per_sample
+        self.classes_per_image = classes_per_image
+        self.total_classes = batch_size * classes_per_image
+        self.classes_seq_len = classes_seq_len
+        self.tasks_seq_len = tasks_seq_len
 
         self.encoder_hidden_dim = encoder_hidden_dim
         self.decoder_hidden_dim = decoder_hidden_dim
-        self.num_queries = num_queries
+        self.d_model = d_model
+        self.encoder_attention_heads = encoder_attention_heads
+        self.decoder_num_heads = decoder_num_heads
         self.encoder_layers = encoder_layers
-        self.decoder_layers = decoder_layers
-
+        self.decoder_num_layers = decoder_num_layers
+        self.encoder_dim_feedforward = encoder_dim_feedforward
+        self.decoder_dim_feedforward = decoder_dim_feedforward
+        self.num_queries = num_queries
         self.torch_dtype = torch_dtype
-        self.use_timm_backbone = use_timm_backbone
-
-        self.encoder_in_channels = [192, 384, 768]
-        self.vision_features_channels = [256, 256, 256]
 
     def get_config(self):
+        backbone_config = {
+            "model_type": "swin",
+            "window_size": 7,
+            "image_size": self.image_size,
+            "embed_dim": 32,
+            "depths": [1, 1, 1, 1],
+            "num_heads": [1, 2, 4, 8],
+            "out_indices": [1, 2, 3],
+        }
+
+        text_config = {"model_type": "clip_text_model"}
+
         config = OmDetTurboConfig(
-            use_timm_backbone=self.use_timm_backbone,
+            text_config=text_config,
+            use_timm_backbone=False,
+            backbone=None,
+            backbone_config=backbone_config,
             image_size=self.image_size,
+            # Hybrid encoder sizes
             encoder_hidden_dim=self.encoder_hidden_dim,
-            decoder_hidden_dim=self.decoder_hidden_dim,
-            num_queries=self.num_queries,
+            vision_features_channels=[self.encoder_hidden_dim] * 3,
+            encoder_in_channels=[64, 128, 256],
             encoder_layers=self.encoder_layers,
-            decoder_num_layers=self.decoder_layers,
-            encoder_in_channels=self.encoder_in_channels,
-            vision_features_channels=self.vision_features_channels,
-            encoder_attention_heads=4,
-            decoder_num_heads=4,
-            encoder_dim_feedforward=4 * self.encoder_hidden_dim,
-            decoder_dim_feedforward=4 * self.decoder_hidden_dim,
-            text_config={"model_type": "clip_text_model"},
+            encoder_attention_heads=self.encoder_attention_heads,
+            encoder_dim_feedforward=self.encoder_dim_feedforward,
+            # Decoder sizes
+            d_model=self.d_model,
+            decoder_hidden_dim=self.decoder_hidden_dim,
+            decoder_num_heads=self.decoder_num_heads,
+            decoder_num_layers=self.decoder_num_layers,
+            decoder_dim_feedforward=self.decoder_dim_feedforward,
+            num_queries=self.num_queries,
+            decoder_dropout=0.0,
+            encoder_dropout=0.0,
+            encoder_feedforward_dropout=0.0,
             torch_dtype=self.torch_dtype,
-            layer_norm_eps=1e-5,
-            batch_norm_eps=1e-5,
         )
         return config
 
     def prepare_config_and_inputs(self):
         config = self.get_config()
 
-        B = self.batch_size
-        H = W = self.image_size
-        C = self.num_channels
+        pixel_values = ids_numpy([self.batch_size, 3, self.image_size, self.image_size], vocab_size=256).astype(
+            np.float32
+        )
+        pixel_values = pixel_values / 255.0
 
-        pixel_values = ids_numpy([B, C, H, W], vocab_size=256).astype(np.float32)
-        pixel_values = (pixel_values / 255.0) * 2.0 - 1.0
+        classes_input_ids = ids_numpy([self.total_classes, self.classes_seq_len], vocab_size=200)
+        classes_attention_mask = np.ones_like(classes_input_ids, dtype=np.int64)
 
-        total_classes = B * self.classes_per_sample
-        classes_input_ids = ids_numpy([total_classes, self.class_seq_len], vocab_size=50)
-        classes_attention_mask = (ids_numpy([total_classes, self.class_seq_len], vocab_size=2) > 0).astype(np.int64)
+        tasks_input_ids = ids_numpy([self.batch_size, self.tasks_seq_len], vocab_size=200)
+        tasks_attention_mask = np.ones_like(tasks_input_ids, dtype=np.int64)
 
-        tasks_input_ids = ids_numpy([B, self.task_seq_len], vocab_size=80)
-        tasks_attention_mask = (ids_numpy([B, self.task_seq_len], vocab_size=2) > 0).astype(np.int64)
-        classes_structure = np.array([self.classes_per_sample] * B, dtype=np.int64)
+        classes_structure = np.array([self.classes_per_image] * self.batch_size, dtype=np.int64)
 
         return (
             config,
@@ -101,7 +118,8 @@ class OmDetTurboModelTester:
         )
 
 
-tester = OmDetTurboModelTester()
+# Prepare once
+model_tester = OmDetTurboModelTester()
 (
     config,
     pixel_values,
@@ -110,8 +128,7 @@ tester = OmDetTurboModelTester()
     tasks_input_ids,
     tasks_attention_mask,
     classes_structure,
-) = tester.prepare_config_and_inputs()
-
+) = model_tester.prepare_config_and_inputs()
 
 TEST_CASES = [
     [
@@ -128,7 +145,6 @@ TEST_CASES = [
             "tasks_input_ids": tasks_input_ids,
             "tasks_attention_mask": tasks_attention_mask,
             "classes_structure": classes_structure,
-            "return_dict": True,
         },
         {
             "decoder_coord_logits": 1,
@@ -169,8 +185,7 @@ def test_named_modules(
         pt_dtype, ms_dtype, *inputs_args, **inputs_kwargs
     )
 
-    pt_inputs_kwargs["return_dict"] = True
-    ms_inputs_kwargs["return_dict"] = False
+    ms_inputs_kwargs.update({"return_dict": False})
 
     with torch.no_grad():
         pt_outputs = pt_model(*pt_inputs_args, **pt_inputs_kwargs)

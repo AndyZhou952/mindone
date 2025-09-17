@@ -28,7 +28,6 @@ from mindspore import Parameter, mint
 from mindspore.common.initializer import Constant, Normal, Uniform, XavierUniform, initializer
 
 from ...activations import ACT2CLS, ACT2FN
-from ...integrations import use_kernel_forward_from_hub
 from ...modeling_attn_mask_utils import _prepare_4d_attention_mask
 from ...modeling_utils import PreTrainedModel
 from ...utils.backbone_utils import load_backbone
@@ -176,7 +175,6 @@ class OmDetTurboObjectDetectionOutput(ModelOutput):
 
 
 # Copied from models.deformable_detr.MultiScaleDeformableAttention
-@use_kernel_forward_from_hub("MultiScaleDeformableAttention")
 class MultiScaleDeformableAttention(ms.nn.Cell):
     def construct(
         self,
