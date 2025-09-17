@@ -93,6 +93,7 @@ MODEL_MAPPING_NAMES = OrderedDict(
         ("mt5", "MT5Model"),
         ("megatron-bert", "MegatronBertModel"),
         ("mixtral", "MixtralModel"),
+        ("omdet-turbo", "OmDetTurboForObjectDetection"),
         ("owlvit", "OwlViTModel"),
         ("phi", "PhiModel"),
         ("phi3", "Phi3Model"),

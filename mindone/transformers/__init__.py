@@ -469,6 +469,7 @@ from .models.mvp import (
     MvpModel,
     MvpPreTrainedModel,
 )
+from .models.omdet_turbo import OmDetTurboForObjectDetection, OmDetTurboPreTrainedModel
 from .models.opt import (
     OPTForCausalLM,
     OPTForQuestionAnswering,

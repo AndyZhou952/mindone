@@ -70,6 +70,7 @@ from . import (
     mobilebert,
     mpt,
     mvp,
+    omdet_turbo,
     opt,
     owlvit,
     paligemma,
